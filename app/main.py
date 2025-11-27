@@ -9,7 +9,7 @@ app = FastAPI()
 
 # create a constant that has 100 fake users
 id = uuid4()
-users= [User(search_id=str(id), user_id =str(i),  name=f"User{i}", age=20 + i % 10) for i in range(1_000)]
+users= [User(search_id=str(id), user_id =str(i),  name=f"User{i}", age=20 + i % 10, timestamp=int(time.thread_time_ns())) for i in range(5)]
 
 @app.post("/")
 def add_results(item:Item):
@@ -31,7 +31,7 @@ def add_results(item:Item):
 def read_results(search_id:Annotated[UUID,Path()]):
     start_time = time.perf_counter()
     results = []
-    for user in User.query(str(search_id), User.user_id > 900, limit=10):
+    for user in User.query(str(search_id), limit=10):
         results.append(user)
     end_time = time.perf_counter()
     elapsed_time_secs = end_time - start_time
@@ -39,3 +39,21 @@ def read_results(search_id:Annotated[UUID,Path()]):
     print(msg)
     return {"message": results}
 
+@app.put("/{search_id}")
+def update_result(search_id:Annotated[UUID,Path()], user_id: str, subjects: list[str]):
+    user = User.get(str(search_id), user_id)
+    user.subject = subjects
+    user.save()
+    return {"message": "Updated successfully"}
+
+@app.get("/count/{search_id}")
+def count_results(search_id:Annotated[UUID,Path()]):
+    start_time = time.perf_counter()
+    count = 0
+    for _ in User.query(str(search_id), filter_condition=User.subject.exists()):
+        count += 1
+    end_time = time.perf_counter()
+    elapsed_time_secs = end_time - start_time
+    msg = f"Execution took: {timedelta(seconds=round(elapsed_time_secs))} (Wall clock time)"
+    print(msg)
+    return {"message": count}
