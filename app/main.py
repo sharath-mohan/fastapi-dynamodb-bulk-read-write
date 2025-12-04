@@ -54,7 +54,12 @@ def read_products(
     search_id: Annotated[UUID, Path()],
     limit: Annotated[int, Query()] = 10,
     offset: Annotated[int, Query()] = 0,
+    is_previous: Annotated[bool, Query()] = False,
 ):
+    total_products = Product.view_index.count(str(search_id))
+
+    # 294791
+
     results = []
     start_time = time.perf_counter()
     # query =  Product.query(str(search_id), limit=limit)
@@ -63,14 +68,24 @@ def read_products(
     # query = Product.view_index.query(str(search_id), Product.timestamp > offset, limit=limit)
     # items = [product.attribute_values for product in query]
     # return {"message": items}
-    index_results = list(
-        Product.view_index.query(
-            str(search_id),
-            Product.timestamp > offset,
-            limit=limit,
-            last_evaluated_key=None,
+    if is_previous:
+        index_results = list(
+            Product.view_index.query(
+                str(search_id),
+                Product.timestamp >= offset,
+                limit=limit,
+                last_evaluated_key=None,
+            )
         )
-    )
+    else:
+        index_results = list(
+            Product.view_index.query(
+                str(search_id),
+                Product.timestamp > offset,
+                limit=limit,
+                last_evaluated_key=None,
+            )
+        )
     keys_to_fetch = [(item.search_id, item.product_id) for item in index_results]
     print(f"Keys to fetch: {keys_to_fetch}")
     if keys_to_fetch:
@@ -79,16 +94,19 @@ def read_products(
     end_time = time.perf_counter()
     elapsed_time_secs = end_time - start_time
     msg = f"Execution took: {timedelta(seconds=round(elapsed_time_secs))} (Wall clock time)"
-    total_products = Product.view_index.count(str(search_id))
+    # total_products = Product.view_index.count(str(search_id))
     print(msg)
     return {
-        "message": results,
+        # "message": results,
+        "first_index": index_results[0].timestamp if index_results else None,
         "lastIndex": index_results[-1].timestamp if index_results else None,
-        "last_index_item": index_results[-1].attribute_values
-        if index_results
-        else None,
-        "keys_to_fetch": keys_to_fetch,
-        "total_products": total_products,
+        # "last_index_item": index_results[-1].attribute_values
+        # if index_results
+        # else None,
+        # "keys_to_fetch": keys_to_fetch,
+        # "result_count": len(results),
+        "product_codes": sorted([int(item["product_id"]) for item in results]),
+        # "total_products": total_products,
     }
 
 
