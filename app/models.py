@@ -1,7 +1,7 @@
 from pynamodb.models import Model
 from pynamodb.attributes import UnicodeAttribute, NumberAttribute, ListAttribute
 
-from pynamodb.indexes import GlobalSecondaryIndex, KeysOnlyProjection
+from pynamodb.indexes import GlobalSecondaryIndex, KeysOnlyProjection, AllProjection
 
 
 class User(Model):
@@ -28,10 +28,8 @@ class ViewIndex(GlobalSecondaryIndex):
     class Meta:
         # index_name is optional, but can be provided to override the default name
         index_name = "timestamp_index"
-        read_capacity_units = 2
-        write_capacity_units = 1
         # All attributes are projected
-        projection = KeysOnlyProjection()
+        projection = AllProjection()
 
     # This attribute is the hash key for the index
     # Note that this attribute must also exist

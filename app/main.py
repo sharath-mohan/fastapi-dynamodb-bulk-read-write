@@ -4,10 +4,20 @@ from .schema import Item
 from .models import User, Product
 from uuid import uuid4, UUID
 import time
-from typing import Annotated
+from typing import Annotated, Optional
 from datetime import timedelta
+import base64
+import json
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # create a constant that has 100 fake users
 id = uuid4()
@@ -34,7 +44,7 @@ def add_products():
             name=f"Product{i}",
             timestamp=int(time.thread_time_ns()),
         )
-        for i in range(100)
+        for i in range(36)
     ]
     i = 0
     with Product.batch_write() as batch:
@@ -49,11 +59,22 @@ def add_products():
     return {"message": len(products)}
 
 
+def encode_cursor(last_evaluated_key: dict) -> str:
+    """Encode last evaluated key to base64 string"""
+    return base64.b64encode(json.dumps(last_evaluated_key).encode()).decode()
+
+
+def decode_cursor(cursor: str) -> dict:
+    """Decode base64 cursor to last evaluated key"""
+    return json.loads(base64.b64decode(cursor.encode()).decode())
+
+
 @app.get("/products/{search_id}")
 def read_products(
     search_id: Annotated[UUID, Path()],
     limit: Annotated[int, Query()] = 10,
-    offset: Annotated[int, Query()] = 0,
+    start_index: Annotated[int, Query()] = 0,
+    cursor: Optional[str] = Query(default=None),
     is_previous: Annotated[bool, Query()] = False,
 ):
     total_products = Product.view_index.count(str(search_id))
@@ -64,48 +85,73 @@ def read_products(
     start_time = time.perf_counter()
     # query =  Product.query(str(search_id), limit=limit)
     # items = [product.attribute_values for product in query]
-
-    # query = Product.view_index.query(str(search_id), Product.timestamp > offset, limit=limit)
-    # items = [product.attribute_values for product in query]
-    # return {"message": items}
     if is_previous:
-        index_results = list(
-            Product.view_index.query(
-                str(search_id),
-                Product.timestamp >= offset,
-                limit=limit,
-                last_evaluated_key=None,
-            )
+        query = Product.view_index.query(
+            str(search_id),
+            Product.timestamp >= start_index,
+            scan_index_forward=True,
+            page_size=limit,
+            limit=limit,
         )
+        print("prev lek now", query.last_evaluated_key)
     else:
-        index_results = list(
-            Product.view_index.query(
-                str(search_id),
-                Product.timestamp > offset,
-                limit=limit,
-                last_evaluated_key=None,
-            )
+        print("in here")
+        last_evaluated_key = None
+        if cursor:
+            last_evaluated_key = decode_cursor(cursor)
+            print(f"Decoded cursor: {last_evaluated_key}")
+        query = Product.view_index.query(
+            str(search_id),
+            scan_index_forward=True,
+            last_evaluated_key=last_evaluated_key,
+            page_size=limit,
+            limit=limit,
         )
-    keys_to_fetch = [(item.search_id, item.product_id) for item in index_results]
-    print(f"Keys to fetch: {keys_to_fetch}")
-    if keys_to_fetch:
-        for full_item in Product.batch_get(keys_to_fetch):
-            results.append(full_item.attribute_values)
+        print("next lek now", query.last_evaluated_key)
+    items = [product.attribute_values for product in query]
+    # return {"message": items}
+    # if is_previous:
+    #     index_results = list(
+    #         Product.view_index.query(
+    #             str(search_id),
+    #             scan_index_forward=False,
+    #             limit=limit,
+    #             last_evaluated_key=None,
+    #         )
+    #     )
+    # else:
+    #     index_results = list(
+    #         Product.view_index.query(
+    #             str(search_id),
+    #             scan_index_forward=False,
+    #             limit=limit,
+    #             last_evaluated_key=None,
+    #         )
+    #     )
+    # keys_to_fetch = [(item.search_id, item.product_id) for item in index_results]
+    # print(f"Keys to fetch: {keys_to_fetch}")
+    # if keys_to_fetch:
+    #     for full_item in Product.batch_get(keys_to_fetch):
+    #         results.append(full_item.attribute_values)
     end_time = time.perf_counter()
     elapsed_time_secs = end_time - start_time
     msg = f"Execution took: {timedelta(seconds=round(elapsed_time_secs))} (Wall clock time)"
     # total_products = Product.view_index.count(str(search_id))
     print(msg)
     return {
+        "message": items,
+        "last_evaluated_key": encode_cursor(query.last_evaluated_key),
+        "lek": query.last_evaluated_key,
+        "first_index": items[0]["timestamp"] if items else None,
         # "message": results,
-        "first_index": index_results[0].timestamp if index_results else None,
-        "lastIndex": index_results[-1].timestamp if index_results else None,
+        # "first_index": index_results[0].timestamp if index_results else None,
+        # "lastIndex": index_results[-1].timestamp if index_results else None,
         # "last_index_item": index_results[-1].attribute_values
         # if index_results
         # else None,
         # "keys_to_fetch": keys_to_fetch,
         # "result_count": len(results),
-        "product_codes": sorted([int(item["product_id"]) for item in results]),
+        # "product_codes": sorted([int(item["product_id"]) for item in results]),
         # "total_products": total_products,
     }
 
